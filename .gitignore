@@ -1,0 +1,9 @@
+*.exe
+*.obj
+*.dll
+*.so
+*.a
+*.lib
+build/
+bin/
+assimp/

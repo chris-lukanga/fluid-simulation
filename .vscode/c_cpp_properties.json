@@ -1,0 +1,29 @@
+{
+    "configurations": [
+        {
+            "name": "Clang with MinGW",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [],
+            "compilerPath": "C:/Program Files/LLVM/bin/clang++.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            
+            // CRITICAL SETTING 1: Use the compile commands we generated
+            // This reads the exact flags (like --target) from CMake
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+
+            // CRITICAL SETTING 2: Force IntelliSense to use Clang logic
+            // but compatible with GCC-style headers
+            "intelliSenseMode": "linux-clang-x64",
+            
+            // CRITICAL SETTING 3: If compileCommands fails, 
+            // these args help VS Code find the right headers manually
+            "compilerArgs": [
+                "--target=x86_64-w64-mingw32"
+            ]
+        }
+    ],
+    "version": 4
+}
