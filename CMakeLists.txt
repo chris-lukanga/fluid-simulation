@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # -----------------------
 # 1. Force Clang & Target MinGW
 # -----------------------
@@ -24,23 +25,26 @@ set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 # -----------------------
 # 4. Sources (Standard C/C++ files only)
 # -----------------------
-# Note: We intentionally DO NOT glob .cppm files here anymore
 file(GLOB SRC_FILES "src/*.cpp" "src/*.c") 
 
 # -----------------------
-# 5. Executable
+# 5. Executable (Name it app.exe)
 # -----------------------
-add_executable(MyProject
+add_executable(app
     main.cpp
     "src/glad.c"
     ${SRC_FILES}
 )
 
+# Force the executable to be output in parent folder of build dir
+set_target_properties(app PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/.."
+)
+
 # -----------------------
-# 6. REGISTER MODULES (The Fix)
+# 6. REGISTER MODULES
 # -----------------------
-# This tells CMake explicitly that 'utilities.cppm' is a C++20 Module
-target_sources(MyProject PUBLIC
+target_sources(app PUBLIC
     FILE_SET CXX_MODULES FILES 
     utilities.cppm
 )
@@ -48,9 +52,9 @@ target_sources(MyProject PUBLIC
 # -----------------------
 # 7. Includes & Libraries
 # -----------------------
-target_include_directories(MyProject PRIVATE "${CMAKE_SOURCE_DIR}/include")
+target_include_directories(app PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
-target_link_libraries(MyProject PRIVATE
+target_link_libraries(app PRIVATE
     "${CMAKE_SOURCE_DIR}/glfw3.dll"
     opengl32
     gdi32
@@ -61,8 +65,8 @@ target_link_libraries(MyProject PRIVATE
 # -----------------------
 # 8. Auto-copy DLL
 # -----------------------
-add_custom_command(TARGET MyProject POST_BUILD
+add_custom_command(TARGET app POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/glfw3.dll"
-    $<TARGET_FILE_DIR:MyProject>
+    $<TARGET_FILE_DIR:app>
 )
