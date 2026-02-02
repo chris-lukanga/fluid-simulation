@@ -5,68 +5,92 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include <shader.h> 
 #include <iostream>
 #include <vector>
 #include <cstdlib>
 #include <ctime>
+#include <algorithm>
+#include <string>
+#include <fstream>
+#include <sstream>
 
+// Include your header files
+// Make sure ComputeShader.h has setInt and setVec2 added as discussed!
+#include "computeShader.h" 
 
-// Screen size
-int SCR_WIDTH  = 800;
+#include "shader.h"
+// ---------------------------------------------------------
+// 2. Constants & Globals
+// ---------------------------------------------------------
+int SCR_WIDTH = 800;
 int SCR_HEIGHT = 600;
 
-// Time variables
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-float factor = 1.0f;
 
-// ---------------------------------------------------------
-// Global Vectors (Must be vectors to grow dynamically)
-// ---------------------------------------------------------
-struct pointLight {
-    glm::vec4 pos_radius;
+
+float factor = 1.0f;
+bool resendData = false; 
+
+constexpr uint32_t MAX_PARTICLES = 10000;
+constexpr uint32_t INITIAL_PARTICLES = 50;
+constexpr float GRAVITY = 50.0f;
+
+struct alignas(16) Particle {
+    glm::vec4 pos_radius; // x,y,z, radius
+    glm::vec4 velocity; 
     glm::vec4 color;
 };
 
-// We rely on .size() instead of a manual integer counter to be safe
-std::vector<pointLight> lights;
-std::vector<glm::vec2> quadOffsets;
-std::vector<glm::vec3> quadColors;
+std::vector<Particle> particles;
 
-// Forward declaration
-void circle(float x, float y, float radius);
+// ---------------------------------------------------------
+// 3. Helper Functions
+// ---------------------------------------------------------
+glm::vec4 randomColour() {
+    return glm::vec4((rand() % 100) / 100.0f, (rand() % 100) / 100.0f, (rand() % 100) / 100.0f, 1.0f);
+}
 
-// Resize callback
-void framebuffer_size_callback(GLFWwindow* window, int width, int height)
-{
+glm::vec4 randomDirection2D(){
+    float angle = static_cast<float>(rand()) / static_cast<float>(RAND_MAX) * 2.0f * 3.14159265f;
+    return glm::vec4(cos(angle), sin(angle), 0.0f, 0.0f);
+}
+
+void circle(float x, float y, float radius) {
+    if (particles.size() >= MAX_PARTICLES) return;
+    
+    Particle newparticle;
+    newparticle.pos_radius = glm::vec4(x, y, radius, 1.0f);
+    //newparticle.velocity = randomDirection2D() * 200.0f; // Speed 200
+    newparticle.velocity = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f); // Start stationary
+    newparticle.color = randomColour();
+    
+    particles.push_back(newparticle);
+    resendData = true; // Flag to append this single particle
+}
+
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);
     SCR_WIDTH = width;
     SCR_HEIGHT = height;
 }
 
-// Input processing
-bool mousePressed = false; // Debounce variable
-void processInput(GLFWwindow* window)
-{
+void processInput(GLFWwindow* window) {
+    static bool mousePressed = false;
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
-
     if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
-        factor = glm::clamp(factor + 10.0f*deltaTime, 1.0f, 500.0f);
-    
+        factor = glm::clamp(factor + 10.0f * deltaTime, 1.0f, 500.0f);
     if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
-        factor = glm::clamp(factor - 10.0f*deltaTime, 1.0f, 500.0f);
+        factor = glm::clamp(factor - 10.0f * deltaTime, 1.0f, 500.0f);
 
-    // MOUSE CLICK TO ADD CIRCLE
     if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
         if (!mousePressed) {
             double xpos, ypos;
             glfwGetCursorPos(window, &xpos, &ypos);
-            // Convert GLFW coordinates (Top-Left 0,0) to Center 0,0
             float centerX = (float)xpos - (SCR_WIDTH / 2.0f);
-            float centerY = (SCR_HEIGHT / 2.0f) - (float)ypos; // Invert Y
+            float centerY = (SCR_HEIGHT / 2.0f) - (float)ypos; 
             circle(centerX, centerY, 50.0f);
             mousePressed = true;
         }
@@ -75,186 +99,168 @@ void processInput(GLFWwindow* window)
     }
 }
 
+// ---------------------------------------------------------
+// 4. Main
+// ---------------------------------------------------------
 int main()
 {
-
     srand(static_cast <unsigned> (time(0)));
 
-    // ------------------------------------------------------------
-    // 1. GLFW + OpenGL setup
-    // ------------------------------------------------------------
     glfwInit();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4); // SSBOs require 4.3+, usually 4.6 is safe
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "OpenGL Dynamic SSBO", nullptr, nullptr);
-    if (!window)
-    {
-        std::cerr << "Failed to create window\n";
-        glfwTerminate();
-        return -1;
-    }
-
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Compute Shader Physics", nullptr, nullptr);
+    if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
-    {
-        std::cerr << "Failed to init GLAD\n";
-        return -1;
-    }
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) return -1;
 
-    // ------------------------------------------------------------
-    // 2. OpenGL state
-    // ------------------------------------------------------------
+    // OpenGL State
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
 
-    // ------------------------------------------------------------
-    // 3. Shaders
-    // ------------------------------------------------------------
+    // Shaders
     Shader shader("shaders/vertex2D.vert", "shaders/fragment2D.frag");
     Shader bgShader("shaders/background.vert", "shaders/background.frag");
+    ComputeShader computeShader("shaders/physics.comp");
 
-    // ------------------------------------------------------------
-    // 4. Quad geometry
-    // ------------------------------------------------------------
-    float quadVertices[] = {
-        -0.5f, -0.5f,
-         0.5f, -0.5f,
-         0.5f,  0.5f,
-
-        -0.5f, -0.5f,
-         0.5f,  0.5f,
-        -0.5f,  0.5f
-    };
-
-    unsigned int VAO, VBO;
-    glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
-    glBindVertexArray(VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    // Quad Geometry
+    float quadVertices[] = { -0.5f,-0.5f, 0.5f,-0.5f, 0.5f,0.5f, -0.5f,-0.5f, 0.5f,0.5f, -0.5f,0.5f };
+    unsigned int VAO, VBO, bgVAO, bgVBO;
+    
+    glGenVertexArrays(1, &VAO); glGenBuffers(1, &VBO);
+    glBindVertexArray(VAO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    unsigned int bgVAO, bgVBO;
-    glGenVertexArrays(1, &bgVAO);
-    glGenBuffers(1, &bgVBO);
-    glBindVertexArray(bgVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, bgVBO);
+    glGenVertexArrays(1, &bgVAO); glGenBuffers(1, &bgVBO);
+    glBindVertexArray(bgVAO); glBindBuffer(GL_ARRAY_BUFFER, bgVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // ------------------------------------------------------------
-    // 5. Initial Random Lights
-    // ------------------------------------------------------------
-    int initialCount = 500; 
+    // Initial Particles
+    int initialCount = INITIAL_PARTICLES;
     for (int i = 0; i < initialCount; i++){
-        float x = rand() % (SCR_WIDTH) - SCR_WIDTH / 2.0f;
-        float y = rand() % (SCR_HEIGHT) - SCR_HEIGHT / 2.0f;
-        circle(x, y, 250.0f); // Use our new function to init
+        circle(rand() % SCR_WIDTH - SCR_WIDTH / 2.0f, rand() % SCR_HEIGHT - SCR_HEIGHT / 2.0f, 250.0f);
     }
 
     // ------------------------------------------------------------
-    // 6. SSBO Setup
+    // SSBO Setup 
     // ------------------------------------------------------------
-    GLuint lightSSBO;
-    glGenBuffers(1, &lightSSBO);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, lightSSBO);
-    // Initial data upload
-    glBufferData(GL_SHADER_STORAGE_BUFFER, lights.size() * sizeof(pointLight), lights.data(), GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, lightSSBO);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    GLuint particlesSSBO;
+    glGenBuffers(1, &particlesSSBO);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, particlesSSBO);
+    
+    // CRITICAL: Allocate memory for MAX_PARTICLES upfront. 
+    // This allows the buffer to exist permanently on the GPU.
+    // We do NOT use NULL here; we upload the initial data immediately.
+    // If particles.size() < MAX_PARTICLES, the rest is garbage/zero, which is fine as we don't draw it.
+    
+    // 1. Create a temporary vector filled with zeros to initialize the full GPU buffer cleanly
+    std::vector<Particle> initialBuffer(MAX_PARTICLES);
+    // 2. Copy our actual particles into it
+    std::copy(particles.begin(), particles.end(), initialBuffer.begin());
+    
+    // 3. Upload the full MAX sized buffer
+    glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_PARTICLES * sizeof(Particle), initialBuffer.data(), GL_DYNAMIC_DRAW);
+    
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, particlesSSBO);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); // Unbind
 
     // ------------------------------------------------------------
-    // 7. Render loop
+    // Render Loop
     // ------------------------------------------------------------
+    float fpsTimer = 0.0f;
+    int fpsFrameCount = 0;
+
     while (!glfwWindowShouldClose(window))
     {
         float currentFrame = (float)glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
-        std::cout << "Frame rate: " << 1.0f / deltaTime << " FPS\r"<< std::endl;
-        
+
+        fpsTimer += deltaTime;
+        fpsFrameCount++;
+        if (fpsTimer >= 1.0f) {
+            std::cout << "FPS: " << fpsFrameCount << " | Particles: " << particles.size() << "\r";
+            std::cout.flush();
+            fpsTimer = 0.0f;
+            fpsFrameCount = 0;
+        }
+
         processInput(window);
-
-        // Resize Logic
         if (SCR_WIDTH == 0 || SCR_HEIGHT == 0) { glfwWaitEvents(); continue; }
-        
-        glm::mat4 projection = glm::ortho(
-            -(float)SCR_WIDTH / 2.0f, (float)SCR_WIDTH / 2.0f,
-            -(float)SCR_HEIGHT / 2.0f, (float)SCR_HEIGHT / 2.0f
-        );
-
-        glClear(GL_COLOR_BUFFER_BIT);
-        float time = (float)glfwGetTime();
 
         // ---------------------------------------------------------
-        // UPDATE LIGHT POSITIONS (CPU SIDE)
+        // 1. UPLOAD NEW DATA (Only if changed)
         // ---------------------------------------------------------
-        for (size_t i = 0; i < lights.size(); i++)
-        {
-            // Simple animation logic
-            // lights[i].position = glm::vec4(quadOffsets[i], 0.0f, 1.0f);
+        if (resendData) {
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, particlesSSBO);
             
-            // Example color pulse
-            lights[i].color = glm::vec4(
-                (sin(time + i) + 1.0f) / 2.0f,
-                (cos(time + i) + 1.0f) / 2.0f,
-                (sin(time * 0.5f + i) + 1.0f) / 2.0f,
-                1.0f
-            );
+            // CRITICAL FIX: Do NOT call glBufferData again!
+            // We only want to update the single new particle at the end of the list.
+            
+            // Index of the new particle is the last one in the vector
+            int newIndex = static_cast<int>(particles.size()) - 1;
+            
+            // Calculate byte offset: index * sizeof(Particle)
+            GLintptr offset = newIndex * sizeof(Particle);
+            GLsizeiptr size = sizeof(Particle);
+            
+            // Upload only that specific struct
+            glBufferSubData(GL_SHADER_STORAGE_BUFFER, offset, size, &particles[newIndex]);
+            
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+            resendData = false;
         }
 
         // ---------------------------------------------------------
-        // UPLOAD TO GPU (SSBO)
+        // 2. COMPUTE SHADER STEP
         // ---------------------------------------------------------
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, lightSSBO);
-        // CRITICAL FIX: Use glBufferData to re-allocate memory for the new size
-        glBufferData(GL_SHADER_STORAGE_BUFFER, 
-                     lights.size() * sizeof(pointLight), 
-                     lights.data(), 
-                     GL_DYNAMIC_DRAW);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        computeShader.use();
+        computeShader.setFloat("deltaTime", deltaTime);
+        computeShader.setInt("numParticles", static_cast<int>(particles.size())); // Uses setInt now
+        computeShader.setFloat("gravity", GRAVITY);
+        computeShader.setVec2("dimensions", (float)SCR_WIDTH, (float)SCR_HEIGHT); // Uses setVec2 now
+        
+        // Dispatch groups
+        // (total + 255) / 256 ensures we have enough groups to cover all particles
+        computeShader.dispatch((static_cast<unsigned int>(particles.size()) + 255) / 256, 1, 1);
+        
+        // MEMORY BARRIER: Wait for compute to finish writing before drawing
+        computeShader.memoryBarrier();
 
         // ---------------------------------------------------------
-        // RENDER BACKGROUND
+        // 3. RENDER STEP
         // ---------------------------------------------------------
+        glClear(GL_COLOR_BUFFER_BIT);
+        glm::mat4 projection = glm::ortho(-(float)SCR_WIDTH / 2.0f, (float)SCR_WIDTH / 2.0f, -(float)SCR_HEIGHT / 2.0f, (float)SCR_HEIGHT / 2.0f);
+
+        // Background
         bgShader.use();
-        bgShader.setInt("lightCount", (int)lights.size());
+        bgShader.setInt("particlesCount", (int)particles.size());
         bgShader.setFloat("factor", factor);
-        
-        glm::mat4 model = glm::mat4(1.0f);
-        model = glm::scale(model, glm::vec3(SCR_WIDTH, SCR_HEIGHT, 1.0f));
-        
+        glm::mat4 model = glm::scale(glm::mat4(1.0f), glm::vec3(SCR_WIDTH, SCR_HEIGHT, 1.0f));
         bgShader.setMat4("uModel", glm::value_ptr(model));
         bgShader.setMat4("uProjection", glm::value_ptr(projection));
-        bgShader.setMat4("uView", glm::value_ptr(glm::mat4(1.0f)));
-        
         glBindVertexArray(bgVAO);
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
-        // ---------------------------------------------------------
-        // DRAW THE QUADS
-        // ---------------------------------------------------------
+        // Particles
         shader.use();
         shader.setMat4("projection", glm::value_ptr(projection));
+        shader.setFloat("scale", factor);
         glBindVertexArray(VAO);
-
-        for (size_t i = 0; i < lights.size(); i++)
-        {
-            glm::mat4 quadModel = glm::mat4(1.0f);
-            quadModel = glm::translate(quadModel, glm::vec3(lights[i].pos_radius.x, lights[i].pos_radius.y, 0.0f)); 
-            quadModel = glm::scale(quadModel, glm::vec3(2 * factor, 2 * factor, 1.0f));
-
-            shader.setMat4("model", glm::value_ptr(quadModel));
-            shader.setVec3("color", quadColors[i].x, quadColors[i].y, quadColors[i].z);
-            glDrawArrays(GL_TRIANGLES, 0, 6);
+        
+        if (!particles.empty()) {
+            glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(particles.size()));
         }
 
         glfwSwapBuffers(window);
@@ -263,25 +269,4 @@ int main()
 
     glfwTerminate();
     return 0;
-}
-
-// ---------------------------------------------------------
-// Function Definition
-// ---------------------------------------------------------
-void circle(float x, float y, float radius) {
-    // 1. Add to main Light vector (GPU Data)
-    pointLight newLight;
-    newLight.pos_radius = glm::vec4(x, y, radius, 1.0f);
-    newLight.color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
-    lights.push_back(newLight);
-
-    // 2. Add to Animation Helper vectors
-    quadOffsets.push_back(glm::vec2(x, y));
-
-    // 3. Add to Color vector
-    quadColors.push_back(glm::vec3(
-        static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
-        static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
-        static_cast<float>(rand()) / static_cast<float>(RAND_MAX)
-    ));
 }

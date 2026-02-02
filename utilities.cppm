@@ -14,6 +14,11 @@ export glm::vec2 randomDirection2D() {
     return glm::vec2(cos(angle), sin(angle));
 }
 
-export void sayHello() {
-    std::cout << "Hello from utilities module!" << std::endl;
+export glm::vec4 randomColour() {
+    return glm::vec4(
+        static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
+        static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
+        static_cast<float>(rand()) / static_cast<float>(RAND_MAX),
+        1.0f
+    );
 }

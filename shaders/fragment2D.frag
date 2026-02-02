@@ -2,25 +2,26 @@
 out vec4 FragColor;
 
 in vec2 LocalPos;
-uniform vec3 color;
+in vec4 particleColor;
+
+uniform float time;
 
 void main()
 {
-    // Calculate distance from center (0,0)
-    float dist = length(LocalPos);
+    // OPTIMIZATION: Use dot product to get distance squared.
+    // This avoids the expensive sqrt() call found in length().
+    float distSq = dot(LocalPos, LocalPos);
 
-    // 1. HARD CIRCLE (Simple way)
-    // if (dist > 0.5)
-    //     discard;
-    // FragColor = vec4(color, 1.0);
+    // 1. SMOOTH CIRCLE (Optimized)
+    // We must square our thresholds to match the squared distance.
+    // Outer edge (Transparency 0): 0.5 * 0.5  = 0.25
+    // Inner edge (Opacity 1):      0.48 * 0.48 = 0.2304
+    // 
+    // smoothstep returns 0.0 if distSq >= 0.25 and 1.0 if distSq <= 0.2304
+    float alpha = smoothstep(0.25, 0.2304, distSq);
 
-    // 2. SMOOTH CIRCLE (Better way, Anti-aliased)
-    // We use smoothstep to fade the edges slightly so they aren't jagged
-    // 0.5 is the edge, 0.01 is the "blur" amount
-    float alpha = smoothstep(0.5, 0.48, dist);
-
-    // If fully transparent, don't draw
+    // Early exit if transparent
     if (alpha < 0.01) discard;
 
-    FragColor = vec4(color, alpha);
+    FragColor = vec4(particleColor.rgb, alpha);
 }
