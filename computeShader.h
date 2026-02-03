@@ -81,6 +81,11 @@ public:
         if (loc != -1)
             glUniform1i(loc, value);
     }
+    void setBool(const char* name, bool value) const {
+        GLint loc = glGetUniformLocation(m_program, name);
+        if (loc != -1)
+            glUniform1i(loc, static_cast<int>(value));
+    }
 
 private:
     GLuint m_program = 0;

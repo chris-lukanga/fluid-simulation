@@ -12,7 +12,7 @@ layout(std430, binding = 0) buffer particlesBuffer {
     Particle particles[];
 };
 
-uniform float scale;
+
 uniform mat4 projection;
 
 out vec2 LocalPos;
@@ -21,12 +21,10 @@ out vec4 particleColor;
 void main()
 {
     Particle particle = particles[gl_InstanceID];
-
-    // Per-instance scale
-    float r = particle.pos_radius.w * scale;
+    float r = particle.pos_radius.w;
 
     // Scale quad and translate to particles position
-    vec2 worldPos = aPos * r + particle.pos_radius.xy;
+    vec2 worldPos = aPos * (r * 2.0) + particle.pos_radius.xy;
 
     LocalPos   = aPos;        // stays in -0.5 .. 0.5
     particleColor = particle.color; // pass to fragment shader
