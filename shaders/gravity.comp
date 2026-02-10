@@ -1,0 +1,72 @@
+#version 430 core
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Structures & Buffers
+struct Particle {
+    vec4 pos_radius; 
+    vec4 velocity; 
+    vec4 color; 
+};
+
+// Read from Binding 0
+layout(std430, binding = 0) buffer ParticlesBlock {
+    Particle particles[];
+};
+
+// Write to Binding 3 (Field)
+layout(std430, binding = 3) buffer Screen {
+    vec2 fields[];
+};
+
+uniform int   numParticles;
+uniform float gravityConstant;
+uniform vec2  dimensions;
+uniform int   numFields;
+
+
+float smoothingKernel(float r, float dst){
+    float value = max(0, r*r-dst*dst);
+    return value*value*value;
+}
+
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(numFields)) return;
+
+    // 1. Calculate Grid Coordinates (0 to 800, 0 to 600)
+    int width = int(dimensions.x);
+    int gridX = int(idx) % width;
+    int gridY = int(idx) / width;
+
+
+    vec2 cellWorldPos = vec2(
+        float(gridX) - (dimensions.x * 0.5) + 0.5, 
+        float(gridY) - (dimensions.y * 0.5) + 0.5
+    );
+
+    vec2 totalForce = vec2(0.0);
+
+    for(int i = 0; i < numParticles; ++i) {
+        vec2 pPos = particles[i].pos_radius.xy;
+        float pR  = particles[i].pos_radius.w;
+
+        // Calculate distance in World Space
+        vec2 diff = pPos - cellWorldPos; 
+        float distSq = dot(diff, diff); 
+        if (distSq < 0.001) continue;
+        
+        float softening = 10.0;
+        float softenedDistSq = distSq + softening;
+        
+
+        float forceMagnitude = smoothingKernel(pR, sqrt(softenedDistSq)) * gravityConstant;
+        
+        if (distSq > 0.001) {
+            totalForce += normalize(diff) * forceMagnitude;
+        }
+    }
+
+    fields[idx] = totalForce;
+}

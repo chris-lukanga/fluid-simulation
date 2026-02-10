@@ -19,68 +19,22 @@ layout(std430, binding = 1) buffer particles2Block {
     Particle particles2[];
 };
 
+layout(std430, binding = 3) buffer Screen {
+    vec2 fields[];
+};
+
+
 // ---------------------------------------------------------
 // Uniforms
 // ---------------------------------------------------------
 uniform float deltaTime;
 uniform int   numParticles;
-uniform float gravity;           // Global downward gravity
-uniform float gravityConstant;   // Newtonian gravity (G)
+uniform float gravity;          // Global downward gravity
+uniform float gravityConstant;  // Newtonian gravity (G)
 uniform vec2  dimensions;
-uniform bool  bounce;
-
-// ---------------------------------------------------------
-// Helper: Load Particle
-// ---------------------------------------------------------
-Particle loadParticle(uint index) {
-    return bounce ? particles[index] : particles2[index];
-}
-
-// ---------------------------------------------------------
-// Helper: Write Particle
-// ---------------------------------------------------------
-void writeParticle(uint index, Particle p) {
-    if (bounce) {
-        particles2[index] = p;
-    } else {
-        particles[index] = p;
-    }
-}
-
-// ---------------------------------------------------------
-// Physics: Newtonian Gravity (Attraction)
-// ---------------------------------------------------------
-vec2 calculateGravitationalForce(vec2 pos, float r, uint myIdx) {
-    vec2 totalAccel = vec2(0.0);
-    float myMass = r * r * r; // Mass proportional to volume (r^3)
-
-    for (int j = 0; j < numParticles; ++j) {
-        if (j == int(myIdx)) continue;
-
-        Particle other = loadParticle(j);
-        vec2 otherPos = other.pos_radius.xy;
-        float otherR  = other.pos_radius.w;
-        
-        vec2 delta = otherPos - pos;
-        float distSq = dot(delta, delta);
-
-        // Softening prevents division by zero / singularities
-        const float softening = 10.0; 
-        float softenedDistSq = distSq + softening * softening;
-
-        float otherMass = otherR * otherR * otherR;
-        
-        // F = G * m1 * m2 / r^2
-        // a = F / m1 = G * m2 / r^2
-        float forceMagnitude = gravityConstant * otherMass / softenedDistSq;
-        
-        float dist = sqrt(distSq);
-        if (dist > 1e-6) {
-            totalAccel += (delta / dist) * forceMagnitude;
-        }
-    }
-    return totalAccel;
-}
+uniform int   numFields;
+uniform float smoothingRadius = 100.0; // For gravity softening
+float pushStrength = 0.9;    // Strength of the repulsive force to prevent sticking
 
 // ---------------------------------------------------------
 // Physics: Collision Resolution
@@ -89,7 +43,7 @@ void resolveCollisions(inout vec2 pos, inout vec2 vel, float r, uint myIdx, floa
     for (int j = 0; j < numParticles; ++j) {
         if (j == int(myIdx)) continue;
 
-        Particle other = loadParticle(j);
+        Particle other = particles[j];
         vec2 otherPos = other.pos_radius.xy;
         float otherR  = other.pos_radius.w;
 
@@ -114,17 +68,49 @@ void resolveCollisions(inout vec2 pos, inout vec2 vel, float r, uint myIdx, floa
         float vRel = dot(vel - otherVel, n);
 
         if (vRel < 0.0) {
-            float restitution = 1.0; 
-            
+            float restitution = 1.0; // Bounciness (1.0 = elastic)
             // Baumgarte stabilization (fix sinking)
-            float beta = 0.2; 
+            float beta = 0.2;
             float bias = -beta * max(0.0, penetration - slop) / dt;
-
             float jImpulse = -((1.0 + restitution) * vRel + bias) * 0.5;
+            
             vel += jImpulse * n;
         }
     }
 }
+
+float smoothingKernel(float r, float dst){
+    float value = max(0, r*r-dst*dst);
+    return value*value*value;
+}
+
+void calculatePush(inout vec2 pos, inout vec2 vel, float r, uint myIdx, float dt)
+{
+    for (int j = 0; j < numParticles; ++j)
+    {
+        if (j == int(myIdx)) continue;
+
+        Particle other = particles[j];
+        vec2 diff = other.pos_radius.xy - pos;
+
+        float distSq = dot(diff, diff);
+        float hSq = smoothingRadius * smoothingRadius;
+
+        if (distSq >= hSq || distSq < 1e-6)
+            continue;
+
+        float dist = sqrt(distSq);
+        vec2 dir = diff / dist;
+
+        float x = smoothingRadius - dist;
+
+        // kernel gradient force
+        float forceMagnitude = pushStrength * x * x;
+
+        vel -= dir * forceMagnitude * dt;
+    }
+}
+
 
 // ---------------------------------------------------------
 // Physics: Boundary Checks
@@ -132,7 +118,7 @@ void resolveCollisions(inout vec2 pos, inout vec2 vel, float r, uint myIdx, floa
 void resolveBoundaries(inout vec2 pos, inout vec2 vel, float r) {
     float halfW = dimensions.x * 0.5;
     float halfH = dimensions.y * 0.5;
-    float wallFriction = 1.0;
+    float wallFriction = 1.0; // Dampens energy when hitting walls
 
     if (pos.x - r < -halfW) {
         pos.x = -halfW + r;
@@ -151,38 +137,38 @@ void resolveBoundaries(inout vec2 pos, inout vec2 vel, float r) {
     }
 }
 
+
+
 // ---------------------------------------------------------
 // MAIN
 // ---------------------------------------------------------
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-    if (idx >= uint(numParticles)) return;
+    if(idx >= uint(numParticles)) return;
 
     // 1. Setup
-    Particle p = loadParticle(idx);
+    Particle p = particles[idx];
     vec2 pos = p.pos_radius.xy;
     vec2 vel = p.velocity.xy;
     float r  = p.pos_radius.w;
-    float dt = min(deltaTime, 0.016);
+    float dt = min(deltaTime, 0.016); // Cap dt to prevent explosion on lag spikes
 
-    // 2. Forces & Integration
-    // Global Gravity
-    vel.y -= gravity * dt; 
+    // 2. Forces
     
-    // N-Body Gravity
-    if (gravityConstant > 0.0) {
-        vel += calculateGravitationalForce(pos, r, idx) * dt;
-    }
+    // A. Global Downward Gravity
+    vel.y -= gravity * dt;
 
-    // Integrate Position
+    calculatePush(pos, vel, r, idx, dt);
+
+    // 3. INTEGRATION (The Missing Step!)
     pos += vel * dt;
 
-    // 3. Constraints
+    // 4. Constraints
     resolveCollisions(pos, vel, r, idx, dt);
     resolveBoundaries(pos, vel, r);
 
-    // 4. Write Back
+    // 5. Write Back
     p.pos_radius.xy = pos;
     p.velocity.xy   = vel;
-    writeParticle(idx, p);
+    particles2[idx] = p;
 }

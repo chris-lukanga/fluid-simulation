@@ -23,5 +23,5 @@ void main()
     // Early exit if transparent
     if (alpha < 0.01) discard;
 
-    FragColor = vec4(particleColor.rgb, alpha);
+   // FragColor = vec4(particleColor.rgb, alpha);
 }

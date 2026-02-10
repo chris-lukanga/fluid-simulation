@@ -1,43 +1,44 @@
-#ifndef SHADER_H
-#define SHADER_H
+#ifndef GRAPHICS_SHADER_H
+#define GRAPHICS_SHADER_H
 
-#include <glad/glad.h> // include glad to get all the required OpenGL headers
-#include <GLFW/glfw3.h>
-  
-#include <string>
-#include <fstream>
-#include <sstream>
-#include <iostream>
-  
-//function to check when a window is resized
-void framebuffer_size_callback(GLFWwindow* window, int width, int height);
+#include "baseShader.h"
 
-//function to check for program linking errors
-void checkProgramLinking(unsigned int program);
-
-//function to read shader source code from a file and removing any BOM if present
-std::string readShaderSource(const char* filePath);
-
-//function to check for shader compilation errors
-void checkShaderCompilation(unsigned int shader, std::string shaderType);
-
-
-class Shader
-{
+class GraphicsShader : public BaseShader {
 public:
-    // the program ID
-    unsigned int ID;
-  
-    // constructor reads and builds the shader
-    Shader(const char* vertexPath, const char* fragmentPath);
-    // use/activate the shader
-    void use();
-    // utility uniform functions
-    void setBool(const std::string &name, bool value) const;  
-    void setInt(const std::string &name, int value) const;   
-    void setFloat(const std::string &name, float value) const;
-    void setVec3(const std::string &name, float x, float y, float z) const;
-    void setMat4(const std::string &name, const float* mat) const;
+    // Constructor reads and builds the shader
+    GraphicsShader(const char* vertexPath, const char* fragmentPath) {
+        // 1. Retrieve source code
+        std::string vCode = readFile(vertexPath);
+        std::string fCode = readFile(fragmentPath);
+        const char* vShaderCode = vCode.c_str();
+        const char* fShaderCode = fCode.c_str();
+
+        // 2. Compile shaders
+        unsigned int vertex, fragment;
+
+        // Vertex Shader
+        vertex = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(vertex, 1, &vShaderCode, NULL);
+        glCompileShader(vertex);
+        checkCompileErrors(vertex, "VERTEX");
+
+        // Fragment Shader
+        fragment = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(fragment, 1, &fShaderCode, NULL);
+        glCompileShader(fragment);
+        checkCompileErrors(fragment, "FRAGMENT");
+
+        // 3. Shader Program
+        ID = glCreateProgram();
+        glAttachShader(ID, vertex);
+        glAttachShader(ID, fragment);
+        glLinkProgram(ID);
+        checkCompileErrors(ID, "PROGRAM");
+
+        // 4. Delete helpers
+        glDeleteShader(vertex);
+        glDeleteShader(fragment);
+    }
 };
-  
-#endif // SHADER_H
+
+#endif // GRAPHICS_SHADER_H
